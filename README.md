@@ -61,6 +61,18 @@ pip install -r requirements.txt
 python main.py
 ```
 
+### 打包为 exe
+
+```bash
+cd serial-terminal
+pip install -r requirements.txt
+pyinstaller --clean SerialTerminal.spec
+```
+
+打包后的 exe 位于 `dist/SerialTerminal.exe`，可直接双击运行。
+
+> **注意**: 如果遇到 `No module named 'PyQt6'` 错误，请确保已执行 `pip install -r requirements.txt` 安装所有依赖。
+
 ## 🛠 技术栈
 
 - **UI 框架**: PyQt6

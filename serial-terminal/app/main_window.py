@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QMenu, QWidget, QVBoxLayout, QHBoxLayout, QMessageBox, QFileDialog,
     QLabel, QPushButton, QApplication, QFrame, QSplitter
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QIcon
 
 from app.serial_manager import SerialManager
@@ -24,6 +24,11 @@ from app.config import AppConfig
 class MainWindow(QMainWindow):
     """应用程序主窗口"""
 
+    # 定义跨线程通信的信号
+    sig_data_received = pyqtSignal(bytes)
+    sig_error = pyqtSignal(str)
+    sig_disconnected = pyqtSignal()
+
     def __init__(self, config: AppConfig):
         super().__init__()
         self._config = config
@@ -31,9 +36,16 @@ class MainWindow(QMainWindow):
 
         # 全局共享的串口管理器
         self._serial_manager = SerialManager()
-        self._serial_manager.set_on_data_received(self._on_global_data_received)
-        self._serial_manager.set_on_error(self._on_global_error)
-        self._serial_manager.set_on_disconnected(self._on_global_disconnected)
+        
+        # 绑定信号到槽函数 (自动处理跨线程)
+        self.sig_data_received.connect(self._on_global_data_received)
+        self.sig_error.connect(self._on_global_error)
+        self.sig_disconnected.connect(self._on_global_disconnected)
+
+        # 设置回调为信号的 emit 方法
+        self._serial_manager.set_on_data_received(self.sig_data_received.emit)
+        self._serial_manager.set_on_error(self.sig_error.emit)
+        self._serial_manager.set_on_disconnected(self.sig_disconnected.emit)
 
         self._syncing_filter = False  # 过滤同步标志
 
@@ -231,7 +243,7 @@ class MainWindow(QMainWindow):
         self.addToolBar(toolbar)
 
         # 连接/断开
-        self._tool_connect_btn = QPushButton("🔌 连接")
+        self._tool_connect_btn = QPushButton("[连接]")
         self._tool_connect_btn.clicked.connect(self._toggle_connect)
         toolbar.addWidget(self._tool_connect_btn)
 
@@ -248,7 +260,7 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(clear_btn)
 
         # 暂停
-        self._tool_pause_btn = QPushButton("⏸ 暂停")
+        self._tool_pause_btn = QPushButton("[暂停]")
         self._tool_pause_btn.setCheckable(True)
         self._tool_pause_btn.clicked.connect(self._toggle_pause)
         toolbar.addWidget(self._tool_pause_btn)
@@ -256,7 +268,7 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
 
         # 新建窗口
-        new_tab_btn = QPushButton("➕ 新建窗口")
+        new_tab_btn = QPushButton("[+新窗口]")
         new_tab_btn.clicked.connect(self._new_tab)
         toolbar.addWidget(new_tab_btn)
 
@@ -353,10 +365,10 @@ class MainWindow(QMainWindow):
     def _update_connect_button(self, connected: bool):
         """更新连接按钮状态"""
         if connected:
-            self._tool_connect_btn.setText("🔌 断开")
+            self._tool_connect_btn.setText("[断开]")
             self._tool_connect_btn.setStyleSheet("background-color: #c44545;")
         else:
-            self._tool_connect_btn.setText("🔌 连接")
+            self._tool_connect_btn.setText("[连接]")
             self._tool_connect_btn.setStyleSheet("")
 
     def _update_status_info(self):
@@ -366,12 +378,12 @@ class MainWindow(QMainWindow):
         tx = self._serial_manager.tx_count
         self._update_connect_button(connected)
         if connected:
-            self._status_connection.setText("🟢 已连接")
+            self._status_connection.setText("[已连接]")
             self._status_connection.setStyleSheet(
                 "padding: 0 8px; font-weight: bold; color: #4ec94e;"
             )
         else:
-            self._status_connection.setText("🔴 未连接")
+            self._status_connection.setText("[未连接]")
             self._status_connection.setStyleSheet(
                 "padding: 0 8px; font-weight: bold; color: #c44545;"
             )
@@ -385,7 +397,7 @@ class MainWindow(QMainWindow):
             paused = not widget.display_widget.is_paused
             widget.display_widget.set_paused(paused)
             self._tool_pause_btn.setChecked(paused)
-            self._tool_pause_btn.setText("▶ 继续" if paused else "⏸ 暂停")
+            self._tool_pause_btn.setText("[继续]" if paused else "[暂停]")
             self._pause_action.setText("继续" if paused else "暂停")
 
     def _clear_display(self):
@@ -486,22 +498,22 @@ class MainWindow(QMainWindow):
 <li>切换窗口时，右侧过滤面板自动切换为对应窗口的过滤条件</li>
 </ul>
 
-<h3>📤 快捷指令</h3>
+<h3>快捷指令</h3>
 <ul>
 <li>点击 <b>+ 添加</b> 添加新指令，支持 HEX/字符串格式</li>
 <li>可设置<b>备注</b>和<b>循环发送周期</b></li>
-<li><b>双击</b>指令行或选中后点击 <b>▶ 发送选中</b> 发送</li>
+<li><b>双击</b>指令行或选中后点击 <b>[发送选中]</b> 发送</li>
 <li>支持导入/导出为 JSON 文件</li>
 </ul>
 
-<h3>🎨 数据过滤</h3>
+<h3>数据过滤</h3>
 <ul>
 <li>勾选<b>启用过滤</b>，输入关键字或正则表达式</li>
 <li>支持<b>白名单</b>（仅显示匹配）和<b>黑名单</b>（隐藏匹配）</li>
 <li>勾选<b>高亮匹配</b>可自定义高亮颜色</li>
 </ul>
 
-<h3>💡 数据显示</h3>
+<h3>数据显示</h3>
 <ul>
 <li>支持 <b>ASCII / HEX / HEX+ASCII</b> 三种显示模式</li>
 <li>勾选<b>时间戳</b>显示每条数据的时间</li>

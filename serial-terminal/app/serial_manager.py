@@ -225,6 +225,17 @@ class SerialManager:
 
     def _read_loop(self):
         """串口数据读取循环（后台线程）"""
+        import traceback
+        log_path = None
+        try:
+            import os
+            log_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "crash.log"
+            )
+        except Exception:
+            pass
+
         while self._running:
             try:
                 if self._serial and self._serial.is_open and self._serial.in_waiting > 0:
@@ -235,11 +246,24 @@ class SerialManager:
                             self._on_data_received(data)
                 else:
                     time.sleep(0.001)
-            except serial.SerialException:
+            except serial.SerialException as e:
+                if log_path:
+                    try:
+                        with open(log_path, "a", encoding="utf-8") as f:
+                            f.write(f"[SerialException] {e}\n")
+                    except Exception:
+                        pass
                 if self._on_disconnected:
                     self._on_disconnected()
                 break
             except Exception as e:
+                if log_path:
+                    try:
+                        with open(log_path, "a", encoding="utf-8") as f:
+                            f.write(f"[ReadThread Error] {e}\n")
+                            traceback.print_exc(file=f)
+                    except Exception:
+                        pass
                 if self._on_error:
                     self._on_error(f"接收错误: {str(e)}")
                 break

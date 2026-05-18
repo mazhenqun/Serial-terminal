@@ -6,22 +6,56 @@ Serial Terminal - Windows 串口调试工具
 
 import sys
 import os
+import traceback
+from datetime import datetime
+
+
+def _get_exe_dir() -> str:
+    """获取 exe 所在目录（打包后也能正确获取）"""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
 
 # 确保 resources 目录在路径中
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
+CRASH_LOG_PATH = os.path.join(_get_exe_dir(), "crash.log")
 
-from app.main_window import MainWindow
-from app.config import AppConfig
+
+def _write_crash_log(exc_type, exc_value, exc_tb):
+    """将崩溃信息写入日志文件"""
+    try:
+        with open(CRASH_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"\n===== {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} =====\n")
+            f.write(f"异常类型: {exc_type.__name__}\n")
+            f.write(f"异常信息: {exc_value}\n")
+            f.write("堆栈跟踪:\n")
+            traceback.print_exception(exc_type, exc_value, exc_tb, file=f)
+            f.write("\n")
+    except Exception:
+        pass
+
+
+def global_excepthook(exc_type, exc_value, exc_tb):
+    """全局未捕获异常处理"""
+    _write_crash_log(exc_type, exc_value, exc_tb)
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+
+sys.excepthook = global_excepthook
 
 
 def main():
-    # 启用高分屏适配
-    QApplication.setHighDpiScaleFactorRoundingPolicy(
-        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
-    )
+    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import Qt
+
+    try:
+        QApplication.setHighDpiScaleFactorRoundingPolicy(
+            Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+        )
+    except Exception:
+        pass
 
     app = QApplication(sys.argv)
     app.setApplicationName("Serial Terminal")
@@ -29,12 +63,14 @@ def main():
     app.setOrganizationName("SerialTerminal")
 
     # 加载配置
+    from app.config import AppConfig
     config = AppConfig()
     config.load()
 
     # 设置样式
     _apply_theme(app, config.data.get("theme", "dark"))
 
+    from app.main_window import MainWindow
     window = MainWindow(config)
     window.show()
 

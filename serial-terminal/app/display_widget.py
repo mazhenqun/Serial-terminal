@@ -124,71 +124,72 @@ class SerialDisplayWidget(QPlainTextEdit):
 
     def append_data(self, data: bytes, is_tx: bool = False):
         """追加接收到的数据"""
-        if self._paused:
-            return
+        try:
+            if self._paused:
+                return
 
-        # 按行分割数据（支持 \r\n, \r, \n）
-        text = data.decode("utf-8", errors="replace")
-        # 统一换行符
-        text = text.replace("\r\n", "\n").replace("\r", "\n")
+            text = data.decode("utf-8", errors="replace")
+            text = text.replace("\r\n", "\n").replace("\r", "\n")
 
-        raw_lines = text.split("\n")
-        for i, line in enumerate(raw_lines):
-            # 最后一个空行跳过（split 末尾产生）
-            if i == len(raw_lines) - 1 and line == "":
-                continue
+            raw_lines = text.split("\n")
+            for i, line in enumerate(raw_lines):
+                if i == len(raw_lines) - 1 and line == "":
+                    continue
 
-            formatted = self._format_line(line, is_tx)
+                formatted = self._format_line(line, is_tx)
 
-            # 过滤检查
-            if self._filter_enabled and self._filter_pattern:
-                if self._filter_mode == "whitelist":
-                    if not self._filter_pattern.search(formatted):
-                        continue
-                else:  # blacklist
-                    if self._filter_pattern.search(formatted):
-                        continue
+                if self._filter_enabled and self._filter_pattern:
+                    if self._filter_mode == "whitelist":
+                        if not self._filter_pattern.search(formatted):
+                            continue
+                    else:
+                        if self._filter_pattern.search(formatted):
+                            continue
 
-            self._buffer.append(formatted)
-            self._buffer_size += 1
+                self._buffer.append(formatted)
+                self._buffer_size += 1
 
-        # 批量刷新到界面
-        if self._buffer_size >= 50:
-            self._flush_buffer()
+            if self._buffer_size >= 50:
+                self._flush_buffer()
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
     def _flush_buffer(self):
         """刷新缓冲到界面"""
-        if not self._buffer:
-            return
+        try:
+            if not self._buffer:
+                return
 
-        scrollbar = self.verticalScrollBar()
+            scrollbar = self.verticalScrollBar()
 
-        # 控制最大行数：如果总行数超过限制，删除前面的行
-        current_lines = self.blockCount()
-        new_lines = len(self._buffer)
-        if current_lines + new_lines > self._max_lines:
-            excess = current_lines + new_lines - self._max_lines
-            if excess >= current_lines:
-                self.clear()
-            else:
-                cursor = self.textCursor()
-                cursor.movePosition(QTextCursor.MoveOperation.Start)
-                for _ in range(excess):
-                    cursor.movePosition(
-                        QTextCursor.MoveOperation.Down,
-                        QTextCursor.MoveMode.KeepAnchor
-                    )
-                cursor.removeSelectedText()
+            current_lines = self.blockCount()
+            new_lines = len(self._buffer)
+            if current_lines + new_lines > self._max_lines:
+                excess = current_lines + new_lines - self._max_lines
+                if excess >= current_lines:
+                    self.clear()
+                else:
+                    cursor = self.textCursor()
+                    cursor.movePosition(QTextCursor.MoveOperation.Start)
+                    for _ in range(excess):
+                        cursor.movePosition(
+                            QTextCursor.MoveOperation.Down,
+                            QTextCursor.MoveMode.KeepAnchor
+                        )
+                    cursor.removeSelectedText()
 
-        text = "\n".join(self._buffer)
-        self.moveCursor(QTextCursor.MoveOperation.End)
-        self.insertPlainText(text + "\n")
-        self._buffer.clear()
-        self._buffer_size = 0
+            text = "\n".join(self._buffer)
+            self.moveCursor(QTextCursor.MoveOperation.End)
+            self.insertPlainText(text + "\n")
+            self._buffer.clear()
+            self._buffer_size = 0
 
-        # 智能滚动：仅当 _auto_scroll 为 True 时才滚动到底部
-        if self._auto_scroll:
-            scrollbar.setValue(scrollbar.maximum())
+            if self._auto_scroll:
+                scrollbar.setValue(scrollbar.maximum())
+        except Exception:
+            import traceback
+            traceback.print_exc()
 
     def wheelEvent(self, event):
         """鼠标滚轮事件：检测用户是否手动滚动"""
@@ -486,7 +487,7 @@ class SerialDisplayWidget(QPlainTextEdit):
         next_btn.clicked.connect(self._find_next)
         bar_layout.addWidget(next_btn)
 
-        close_btn = QPushButton("✕")
+        close_btn = QPushButton("X")
         close_btn.setFixedSize(24, 24)
         close_btn.setStyleSheet("border: none; background: transparent; color: #d4d4d4;")
         close_btn.clicked.connect(self._hide_search_bar)

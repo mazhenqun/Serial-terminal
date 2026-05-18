@@ -217,15 +217,15 @@ class SendWidget(QGroupBox):
         add_cmd_btn.clicked.connect(self._add_command)
         cmd_btn_layout.addWidget(add_cmd_btn)
 
-        send_cmd_btn = QPushButton("▶ 发送选中")
+        send_cmd_btn = QPushButton("[发送选中]")
         send_cmd_btn.clicked.connect(self._send_selected_cmd)
         cmd_btn_layout.addWidget(send_cmd_btn)
 
-        edit_cmd_btn = QPushButton("✎ 编辑")
+        edit_cmd_btn = QPushButton("[编辑]")
         edit_cmd_btn.clicked.connect(self._edit_selected_cmd)
         cmd_btn_layout.addWidget(edit_cmd_btn)
 
-        del_cmd_btn = QPushButton("✕ 删除")
+        del_cmd_btn = QPushButton("[删除]")
         del_cmd_btn.clicked.connect(self._delete_selected_cmd)
         cmd_btn_layout.addWidget(del_cmd_btn)
 
@@ -318,14 +318,14 @@ class SendWidget(QGroupBox):
         self._cmd_table.selectRow(row)
 
         menu = QMenu(self)
-        send_action = menu.addAction("▶ 发送")
+        send_action = menu.addAction("[发送]")
         send_action.triggered.connect(lambda: self._send_cmd(row))
 
         menu.addSeparator()
-        edit_action = menu.addAction("✎ 编辑")
+        edit_action = menu.addAction("[编辑]")
         edit_action.triggered.connect(self._edit_selected_cmd)
 
-        delete_action = menu.addAction("✕ 删除")
+        delete_action = menu.addAction("[删除]")
         delete_action.triggered.connect(self._delete_selected_cmd)
 
         menu.exec(self._cmd_table.mapToGlobal(pos))
