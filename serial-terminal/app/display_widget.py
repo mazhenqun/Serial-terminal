@@ -104,6 +104,15 @@ class SerialDisplayWidget(QPlainTextEdit):
         self.blockCountChanged.connect(self._update_line_number_area_width)
         self.updateRequest.connect(self._update_line_number_area)
 
+        # 启用原生行数限制（替代手动删除，极大提升性能）
+        self.document().setMaximumBlockCount(self._max_lines)
+
+        # 预先生成 ASCII 转换表，加速转换过程
+        self._ascii_translation_table = {0x0D: "\\r", 0x0A: "\\n", 0x09: "\\t", 0x7F: "\\x7f"}
+        for i in range(0x20):
+            if i not in self._ascii_translation_table:
+                self._ascii_translation_table[i] = f"\\x{i:02x}"
+
         # 高亮器
         self._highlighter = DisplayHighlighter(self.document())
 
@@ -128,26 +137,41 @@ class SerialDisplayWidget(QPlainTextEdit):
             if self._paused:
                 return
 
-            text = data.decode("utf-8", errors="replace")
-            text = text.replace("\r\n", "\n").replace("\r", "\n")
-
-            raw_lines = text.split("\n")
-            for i, line in enumerate(raw_lines):
-                if i == len(raw_lines) - 1 and line == "":
-                    continue
-
-                formatted = self._format_line(line, is_tx)
-
+            # HEX 模式直接处理 bytes，避免 decode 丢失非法字符或引发额外开销
+            if self._display_mode == "HEX":
+                hex_str = data.hex(" ").upper()
+                ts = self._get_timestamp() if self._show_timestamp else ""
+                formatted = f"[{ts}] {hex_str}" if ts else hex_str
+                
                 if self._filter_enabled and self._filter_pattern:
-                    if self._filter_mode == "whitelist":
-                        if not self._filter_pattern.search(formatted):
-                            continue
-                    else:
-                        if self._filter_pattern.search(formatted):
-                            continue
-
+                    if self._filter_mode == "whitelist" and not self._filter_pattern.search(formatted):
+                        return
+                    elif self._filter_mode == "blacklist" and self._filter_pattern.search(formatted):
+                        return
+                
                 self._buffer.append(formatted)
                 self._buffer_size += 1
+            else:
+                text = data.decode("utf-8", errors="replace")
+                text = text.replace("\r\n", "\n").replace("\r", "\n")
+
+                raw_lines = text.split("\n")
+                for i, line in enumerate(raw_lines):
+                    if i == len(raw_lines) - 1 and line == "":
+                        continue
+
+                    formatted = self._format_line(line, is_tx)
+
+                    if self._filter_enabled and self._filter_pattern:
+                        if self._filter_mode == "whitelist":
+                            if not self._filter_pattern.search(formatted):
+                                continue
+                        else:
+                            if self._filter_pattern.search(formatted):
+                                continue
+
+                    self._buffer.append(formatted)
+                    self._buffer_size += 1
 
             if self._buffer_size >= 50:
                 self._flush_buffer()
@@ -162,23 +186,8 @@ class SerialDisplayWidget(QPlainTextEdit):
                 return
 
             scrollbar = self.verticalScrollBar()
-
-            current_lines = self.blockCount()
-            new_lines = len(self._buffer)
-            if current_lines + new_lines > self._max_lines:
-                excess = current_lines + new_lines - self._max_lines
-                if excess >= current_lines:
-                    self.clear()
-                else:
-                    cursor = self.textCursor()
-                    cursor.movePosition(QTextCursor.MoveOperation.Start)
-                    for _ in range(excess):
-                        cursor.movePosition(
-                            QTextCursor.MoveOperation.Down,
-                            QTextCursor.MoveMode.KeepAnchor
-                        )
-                    cursor.removeSelectedText()
-
+            
+            # 使用原生的 maximumBlockCount 代替手动 trim，极大提高性能
             text = "\n".join(self._buffer)
             self.moveCursor(QTextCursor.MoveOperation.End)
             self.insertPlainText(text + "\n")
@@ -227,19 +236,16 @@ class SerialDisplayWidget(QPlainTextEdit):
         """格式化单行文本为显示行"""
         ts = self._get_timestamp() if self._show_timestamp else ""
 
-        if self._display_mode == "HEX":
-            hex_str = text.encode("utf-8", errors="replace").hex(" ").upper()
-            if ts:
-                return f"[{ts}] {hex_str}"
-            return hex_str
+        # 注意：纯 HEX 模式已在 append_data 中直接通过 bytes 生成并返回，不会进入此逻辑
 
-        elif self._display_mode == "ASCII":
+        if self._display_mode == "ASCII":
             ascii_str = self._str_to_ascii(text)
             if ts:
                 return f"[{ts}] {ascii_str}"
             return ascii_str
 
         else:  # Mixed
+            # 这里的 HEX 是基于转码后的 utf-8 字符串
             data = text.encode("utf-8", errors="replace")
             hex_str = data.hex(" ").upper()
             ascii_str = self._str_to_ascii(text)
@@ -249,24 +255,7 @@ class SerialDisplayWidget(QPlainTextEdit):
 
     def _str_to_ascii(self, text: str) -> str:
         """将字符串中的不可打印字符转为转义表示，保留 UTF-8 可显示字符"""
-        result = []
-        for ch in text:
-            code = ord(ch)
-            if 0x20 <= code <= 0x7E:
-                result.append(ch)
-            elif code == 0x0D:
-                result.append("\\r")
-            elif code == 0x0A:
-                result.append("\\n")
-            elif code == 0x09:
-                result.append("\\t")
-            elif code < 0x20:
-                # 控制字符，转义
-                result.append(f"\\x{code:02x}")
-            else:
-                # >= 0x7F 的字符（包括中文等多字节 UTF-8），直接保留
-                result.append(ch)
-        return "".join(result)
+        return text.translate(self._ascii_translation_table)
 
     def _get_timestamp(self) -> str:
         """获取时间戳字符串"""
@@ -305,6 +294,7 @@ class SerialDisplayWidget(QPlainTextEdit):
     def set_max_lines(self, max_lines: int):
         """设置最大显示行数"""
         self._max_lines = max_lines
+        self.document().setMaximumBlockCount(max_lines)
 
     def set_filter(self, enabled: bool, pattern: str = "", mode: str = "whitelist",
                    highlight: bool = False, bg_color: str = "#ffff00",
@@ -523,57 +513,46 @@ class SerialDisplayWidget(QPlainTextEdit):
         """查找下一个"""
         if not self._search_text:
             return
-        text = self.toPlainText()
-        pos = text.find(self._search_text, self._last_search_pos)
-        if pos == -1:
-            # 从头开始
-            pos = text.find(self._search_text, 0)
-            if pos == -1:
+        
+        cursor = self.textCursor()
+        cursor.clearSelection() # 清除之前的选中状态以向后查找
+        found_cursor = self.document().find(self._search_text, cursor.position())
+        
+        if found_cursor.isNull():
+            # 回到开头找
+            found_cursor = self.document().find(self._search_text, 0)
+            if found_cursor.isNull():
                 self._search_count_label.setText("无匹配")
                 return
 
-        self._last_search_pos = pos + len(self._search_text)
-        self._select_and_scroll_to(pos, len(self._search_text))
-        self._update_search_count(text)
+        self.setTextCursor(found_cursor)
+        self.ensureCursorVisible()
+        self._search_count_label.setText("匹配")
 
     def _find_previous(self):
         """查找上一个"""
         if not self._search_text:
             return
-        text = self.toPlainText()
-        # 从当前匹配位置之前开始搜索
-        start = self._last_search_pos - len(self._search_text)
-        if start <= 0:
-            start = len(text)
-        pos = text.rfind(self._search_text, 0, start)
-        if pos == -1:
-            # 从末尾开始
-            pos = text.rfind(self._search_text)
-            if pos == -1:
+            
+        cursor = self.textCursor()
+        cursor.clearSelection()
+        found_cursor = self.document().find(self._search_text, cursor.position(), QTextDocument.FindFlag.FindBackward)
+        
+        if found_cursor.isNull():
+            # 从末尾开始找
+            found_cursor = self.document().find(self._search_text, self.document().characterCount() - 1, QTextDocument.FindFlag.FindBackward)
+            if found_cursor.isNull():
                 self._search_count_label.setText("无匹配")
                 return
 
-        self._last_search_pos = pos + len(self._search_text)
-        self._select_and_scroll_to(pos, len(self._search_text))
-        self._update_search_count(text)
+        self.setTextCursor(found_cursor)
+        self.ensureCursorVisible()
+        self._search_count_label.setText("匹配")
 
     def _select_and_scroll_to(self, pos: int, length: int):
-        """选中并滚动到指定位置"""
-        cursor = self.textCursor()
-        cursor.setPosition(pos)
-        cursor.movePosition(
-            QTextCursor.MoveOperation.Right,
-            QTextCursor.MoveMode.KeepAnchor,
-            length
-        )
-        self.setTextCursor(cursor)
-        self.ensureCursorVisible()
+        """选中并滚动到指定位置（已被原生查找替代）"""
+        pass
 
     def _update_search_count(self, text: str):
-        """更新匹配计数"""
-        count = text.count(self._search_text)
-        current = text[:self._last_search_pos].count(self._search_text)
-        if count > 0:
-            self._search_count_label.setText(f"{current}/{count}")
-        else:
-            self._search_count_label.setText("无匹配")
+        """更新匹配计数（为避免大规模文本卡顿，已简化）"""
+        pass

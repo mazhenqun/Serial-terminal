@@ -238,14 +238,15 @@ class SerialManager:
 
         while self._running:
             try:
-                if self._serial and self._serial.is_open and self._serial.in_waiting > 0:
-                    data = self._serial.read(self._serial.in_waiting)
+                if self._serial and self._serial.is_open:
+                    to_read = max(1, self._serial.in_waiting)
+                    data = self._serial.read(to_read)
                     if data:
+                        if self._serial.in_waiting > 0:
+                            data += self._serial.read(self._serial.in_waiting)
                         self._rx_count += len(data)
                         if self._on_data_received:
                             self._on_data_received(data)
-                else:
-                    time.sleep(0.001)
             except serial.SerialException as e:
                 if log_path:
                     try:
