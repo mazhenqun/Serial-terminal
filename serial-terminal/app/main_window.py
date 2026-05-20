@@ -312,6 +312,12 @@ class MainWindow(QMainWindow):
         """新建串口会话 Tab"""
         self._tab_counter += 1
         tab = SerialTabWidget(self._tab_counter)
+
+        # 同步全局暂停状态
+        if hasattr(self, '_tool_pause_btn'):
+            paused = self._tool_pause_btn.isChecked()
+            tab.display_widget.set_paused(paused)
+
         index = self._tab_widget.addTab(tab, tab.tab_title)
         self._tab_widget.setCurrentIndex(index)
 
@@ -395,16 +401,21 @@ class MainWindow(QMainWindow):
         widget = self.current_tab
         if widget and hasattr(widget, 'display_widget'):
             paused = not widget.display_widget.is_paused
-            widget.display_widget.set_paused(paused)
+            # 将暂停/继续状态应用到所有窗口
+            for i in range(self._tab_widget.count()):
+                w = self._tab_widget.widget(i)
+                if isinstance(w, SerialTabWidget) and hasattr(w, 'display_widget'):
+                    w.display_widget.set_paused(paused)
             self._tool_pause_btn.setChecked(paused)
             self._tool_pause_btn.setText("[继续]" if paused else "[暂停]")
             self._pause_action.setText("继续" if paused else "暂停")
 
     def _clear_display(self):
-        """清空显示"""
-        widget = self.current_tab
-        if widget and hasattr(widget, 'display_widget'):
-            widget.display_widget.clear_display()
+        """清空所有窗口显示"""
+        for i in range(self._tab_widget.count()):
+            widget = self._tab_widget.widget(i)
+            if isinstance(widget, SerialTabWidget) and hasattr(widget, 'display_widget'):
+                widget.display_widget.clear_display()
 
     def _toggle_timestamp(self):
         """切换时间戳"""
@@ -468,8 +479,8 @@ class MainWindow(QMainWindow):
 <tr><td><b>F1</b></td><td>连接 / 断开串口</td></tr>
 <tr><td><b>Ctrl + C</b></td><td>复制选中数据</td></tr>
 <tr><td><b>Ctrl + S</b></td><td>保存当前窗口数据</td></tr>
-<tr><td><b>Ctrl + Shift + C</b></td><td>清空当前窗口显示</td></tr>
-<tr><td><b>Ctrl + P</b></td><td>暂停 / 继续数据显示</td></tr>
+<tr><td><b>Ctrl + Shift + C</b></td><td>清空所有窗口显示</td></tr>
+<tr><td><b>Ctrl + P</b></td><td>暂停 / 继续所有窗口数据显示</td></tr>
 <tr><td><b>Ctrl + T</b></td><td>切换时间戳显示</td></tr>
 <tr><td><b>Ctrl + N</b></td><td>新建串口窗口</td></tr>
 <tr><td><b>Ctrl + W</b></td><td>关闭当前窗口</td></tr>
@@ -494,6 +505,7 @@ class MainWindow(QMainWindow):
 <ul>
 <li>点击工具栏 <b>+ 新建窗口</b> 或按 <b>Ctrl+N</b> 创建新窗口</li>
 <li>所有窗口<b>共享同一串口连接</b>，同时接收数据</li>
+<li>“暂停/继续”与“清除”为<b>所有窗口通用</b>的功能，操作时将同步影响所有窗口</li>
 <li>每个窗口可设置<b>独立的过滤条件</b></li>
 <li>切换窗口时，右侧过滤面板自动切换为对应窗口的过滤条件</li>
 </ul>

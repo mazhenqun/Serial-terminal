@@ -164,7 +164,7 @@ def _apply_theme(app, theme: str):
                 color: white;
                 border: none;
                 border-radius: 4px;
-                padding: 6px 16px;
+                padding: 6px 8px;
                 min-height: 24px;
             }
             QPushButton:hover {
@@ -237,6 +237,30 @@ def _apply_theme(app, theme: str):
             }
             QListWidget::item:hover {
                 background-color: #2a2d2e;
+            }
+            QTableWidget, QTableView {
+                background-color: #252526;
+                alternate-background-color: #1e1e1e;
+                color: #d4d4d4;
+                gridline-color: #3c3c3c;
+                border: 1px solid #3c3c3c;
+            }
+            QTableWidget::item:hover, QTableView::item:hover {
+                background-color: #2a2d2e;
+            }
+            QTableWidget::item:selected, QTableView::item:selected {
+                background-color: #094771;
+                color: #ffffff;
+            }
+            QHeaderView::section {
+                background-color: #2d2d2d;
+                color: #d4d4d4;
+                padding: 4px;
+                border: 1px solid #3c3c3c;
+            }
+            QTableCornerButton::section {
+                background-color: #2d2d2d;
+                border: 1px solid #3c3c3c;
             }
             QStatusBar {
                 background-color: #007acc;

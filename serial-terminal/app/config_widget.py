@@ -69,7 +69,7 @@ class SerialConfigWidget(QGroupBox):
         layout.addWidget(self._port_combo)
 
         self._refresh_btn = QPushButton("刷新")
-        self._refresh_btn.setFixedWidth(45)
+        self._refresh_btn.setFixedWidth(55)
         self._refresh_btn.clicked.connect(self.refresh_ports)
         layout.addWidget(self._refresh_btn)
 
@@ -160,7 +160,7 @@ class SerialConfigWidget(QGroupBox):
         self._port_combo.setMinimumWidth(120)
         port_layout.addWidget(self._port_combo, 1)
         self._refresh_btn = QPushButton("刷新")
-        self._refresh_btn.setFixedWidth(50)
+        self._refresh_btn.setFixedWidth(60)
         self._refresh_btn.clicked.connect(self.refresh_ports)
         port_layout.addWidget(self._refresh_btn)
         layout.addLayout(port_layout)

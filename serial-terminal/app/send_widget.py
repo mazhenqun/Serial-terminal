@@ -7,7 +7,7 @@ from typing import Optional
 from datetime import datetime
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QLineEdit,
     QComboBox, QPushButton, QTextEdit, QListWidget,
     QListWidgetItem, QGroupBox, QSpinBox, QCheckBox,
     QSplitter, QMessageBox, QMenu, QInputDialog, QFileDialog,
@@ -211,33 +211,34 @@ class SendWidget(QGroupBox):
         self._cmd_table.cellDoubleClicked.connect(self._on_cmd_double_click)
         layout.addWidget(self._cmd_table)
 
-        # 快捷指令按钮
-        cmd_btn_layout = QHBoxLayout()
+        # 快捷指令按钮 (改用2x3网格布局，确保窗口缩小时文字依然能完整显示)
+        cmd_btn_layout = QGridLayout()
+        cmd_btn_layout.setSpacing(4)
+        cmd_btn_layout.setContentsMargins(0, 0, 0, 0)
+
         add_cmd_btn = QPushButton("+ 添加")
         add_cmd_btn.clicked.connect(self._add_command)
-        cmd_btn_layout.addWidget(add_cmd_btn)
-
-        send_cmd_btn = QPushButton("[发送选中]")
-        send_cmd_btn.clicked.connect(self._send_selected_cmd)
-        cmd_btn_layout.addWidget(send_cmd_btn)
+        cmd_btn_layout.addWidget(add_cmd_btn, 0, 0)
 
         edit_cmd_btn = QPushButton("[编辑]")
         edit_cmd_btn.clicked.connect(self._edit_selected_cmd)
-        cmd_btn_layout.addWidget(edit_cmd_btn)
+        cmd_btn_layout.addWidget(edit_cmd_btn, 0, 1)
 
         del_cmd_btn = QPushButton("[删除]")
         del_cmd_btn.clicked.connect(self._delete_selected_cmd)
-        cmd_btn_layout.addWidget(del_cmd_btn)
+        cmd_btn_layout.addWidget(del_cmd_btn, 0, 2)
 
-        cmd_btn_layout.addStretch()
+        send_cmd_btn = QPushButton("[发送选中]")
+        send_cmd_btn.clicked.connect(self._send_selected_cmd)
+        cmd_btn_layout.addWidget(send_cmd_btn, 1, 0)
 
         import_btn = QPushButton("导入")
         import_btn.clicked.connect(self._import_commands)
-        cmd_btn_layout.addWidget(import_btn)
+        cmd_btn_layout.addWidget(import_btn, 1, 1)
 
         export_btn = QPushButton("导出")
         export_btn.clicked.connect(self._export_commands)
-        cmd_btn_layout.addWidget(export_btn)
+        cmd_btn_layout.addWidget(export_btn, 1, 2)
 
         layout.addLayout(cmd_btn_layout)
 
