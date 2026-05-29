@@ -253,11 +253,11 @@ class SendWidget(QGroupBox):
         if self._append_newline_cb.isChecked():
             nl_type = self._newline_combo.currentText()
             if nl_type == "CR+LF":
-                text += "\\r\\n"
+                text += "\r\n"
             elif nl_type == "CR":
-                text += "\\r"
+                text += "\r"
             elif nl_type == "LF":
-                text += "\\n"
+                text += "\n"
 
         self._add_history(text)
         self.send_requested.emit(text, fmt)
@@ -344,7 +344,13 @@ class SendWidget(QGroupBox):
         """发送指定行的指令"""
         if 0 <= row < len(self._quick_commands):
             cmd = self._quick_commands[row]
-            self.send_requested.emit(cmd.data, cmd.format_type)
+            data = cmd.data
+            # 字符串格式时自动追加换行符 \r\n
+            if cmd.format_type == "string":
+                data += "\r\n"
+            # 统一使用 fmt 标识，与输入框发送保持一致
+            fmt = "HEX" if cmd.format_type == "hex" else "字符串"
+            self.send_requested.emit(data, fmt)
 
     def _update_cycle_timer(self, row: int, cmd: QuickCommandItem):
         """更新循环定时器"""

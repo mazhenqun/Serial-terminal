@@ -4,7 +4,7 @@
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QCheckBox
+    QWidget, QVBoxLayout
 )
 from PyQt6.QtCore import Qt
 
@@ -28,31 +28,9 @@ class SerialTabWidget(QWidget):
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
 
-        # 显示模式工具栏
-        toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("显示:"))
-        self._display_mode_combo = QComboBox()
-        self._display_mode_combo.addItems(["ASCII", "HEX", "HEX+ASCII"])
-        self._display_mode_combo.currentTextChanged.connect(
-            self._on_display_mode_changed
-        )
-        toolbar.addWidget(self._display_mode_combo)
-        toolbar.addStretch()
-        self._ts_cb = QCheckBox("时间戳")
-        self._ts_cb.setChecked(True)
-        self._ts_cb.toggled.connect(self._on_ts_toggled)
-        toolbar.addWidget(self._ts_cb)
-        layout.addLayout(toolbar)
-
         # 数据显示
         self._display_widget = SerialDisplayWidget()
         layout.addWidget(self._display_widget, 1)
-
-    def _on_display_mode_changed(self, mode: str):
-        self._display_widget.set_display_mode(mode)
-
-    def _on_ts_toggled(self, visible: bool):
-        self._display_widget.set_timestamp_visible(visible)
 
     def on_data_received(self, data: bytes):
         self._display_widget.append_data(data, is_tx=False)
@@ -81,8 +59,6 @@ class SerialTabWidget(QWidget):
         """获取当前 Tab 的完整配置"""
         return {
             "filter": self._filter_state,
-            "display_mode": self._display_mode_combo.currentText(),
-            "show_timestamp": self._ts_cb.isChecked(),
         }
 
     def set_tab_config(self, config: dict):
@@ -91,14 +67,6 @@ class SerialTabWidget(QWidget):
             return
         # 过滤
         self._filter_state = config.get("filter", self._filter_state)
-        # 显示模式
-        mode = config.get("display_mode", "ASCII")
-        idx = self._display_mode_combo.findText(mode)
-        if idx >= 0:
-            self._display_mode_combo.setCurrentIndex(idx)
-        # 时间戳
-        show_ts = config.get("show_timestamp", True)
-        self._ts_cb.setChecked(show_ts)
 
     def cleanup(self):
         pass

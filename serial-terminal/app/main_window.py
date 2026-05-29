@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QApplication, QFrame, QSplitter
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QKeySequence, QIcon
+from PyQt6.QtGui import QAction, QActionGroup, QKeySequence, QIcon
 
 from app.serial_manager import SerialManager
 from app.serial_tab import SerialTabWidget
@@ -48,6 +48,11 @@ class MainWindow(QMainWindow):
         self._serial_manager.set_on_disconnected(self.sig_disconnected.emit)
 
         self._syncing_filter = False  # 过滤同步标志
+        self._auto_save_enabled = False
+        self._auto_save_file = None
+        self._auto_save_timer = QTimer(self)
+        self._auto_save_timer.timeout.connect(self._do_auto_save)
+        self._auto_save_timer.setInterval(1000)  # 每秒保存一次
 
         self._setup_ui()
         self._setup_menu()
@@ -154,13 +159,14 @@ class MainWindow(QMainWindow):
 
     def _setup_menu(self):
         menubar = self.menuBar()
+        self._actions = {}
 
         # 文件菜单
         file_menu = menubar.addMenu("文件(&F)")
-        save_action = QAction("保存数据(&S)", self)
-        save_action.setShortcut(QKeySequence("Ctrl+S"))
-        save_action.triggered.connect(self._save_data)
-        file_menu.addAction(save_action)
+        self._actions["save"] = QAction("保存数据(&S)", self)
+        self._actions["save"].setShortcut(QKeySequence("Ctrl+S"))
+        self._actions["save"].triggered.connect(self._save_data)
+        file_menu.addAction(self._actions["save"])
 
         save_as_action = QAction("另存为...", self)
         save_as_action.triggered.connect(self._save_data_as)
@@ -168,56 +174,74 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        exit_action = QAction("退出(&X)", self)
-        exit_action.setShortcut(QKeySequence("Ctrl+Q"))
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
+        self._auto_save_action = QAction("自动保存(&A)", self)
+        self._auto_save_action.setCheckable(True)
+        self._auto_save_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        self._auto_save_action.triggered.connect(self._toggle_auto_save)
+        self._actions["auto_save"] = self._auto_save_action
+        file_menu.addAction(self._auto_save_action)
+
+        file_menu.addSeparator()
+
+        self._actions["exit"] = QAction("退出(&X)", self)
+        self._actions["exit"].setShortcut(QKeySequence("Ctrl+Q"))
+        self._actions["exit"].triggered.connect(self.close)
+        file_menu.addAction(self._actions["exit"])
 
         # 串口菜单
         port_menu = menubar.addMenu("串口(&P)")
-        new_tab_action = QAction("新建窗口(&N)", self)
-        new_tab_action.setShortcut(QKeySequence("Ctrl+N"))
-        new_tab_action.triggered.connect(self._new_tab)
-        port_menu.addAction(new_tab_action)
+        self._actions["new_tab"] = QAction("新建窗口(&N)", self)
+        self._actions["new_tab"].setShortcut(QKeySequence("Ctrl+N"))
+        self._actions["new_tab"].triggered.connect(self._new_tab)
+        port_menu.addAction(self._actions["new_tab"])
 
-        close_tab_action = QAction("关闭窗口(&W)", self)
-        close_tab_action.setShortcut(QKeySequence("Ctrl+W"))
-        close_tab_action.triggered.connect(lambda: self._close_tab(self._tab_widget.currentIndex()))
-        port_menu.addAction(close_tab_action)
+        self._actions["close_tab"] = QAction("关闭窗口(&W)", self)
+        self._actions["close_tab"].setShortcut(QKeySequence("Ctrl+W"))
+        self._actions["close_tab"].triggered.connect(lambda: self._close_tab(self._tab_widget.currentIndex()))
+        port_menu.addAction(self._actions["close_tab"])
 
         port_menu.addSeparator()
 
         self._toggle_connect_action = QAction("连接/断开(F1)", self)
         self._toggle_connect_action.setShortcut(QKeySequence("F1"))
         self._toggle_connect_action.triggered.connect(self._toggle_connect)
+        self._actions["toggle_connect"] = self._toggle_connect_action
         port_menu.addAction(self._toggle_connect_action)
 
         # 显示菜单
         display_menu = menubar.addMenu("显示(&D)")
-        clear_action = QAction("清空显示", self)
-        clear_action.setShortcut(QKeySequence("Ctrl+Shift+C"))
-        clear_action.triggered.connect(self._clear_display)
-        display_menu.addAction(clear_action)
+        self._actions["clear_display"] = QAction("清空显示", self)
+        self._actions["clear_display"].setShortcut(QKeySequence("F9"))
+        self._actions["clear_display"].triggered.connect(self._clear_display)
+        display_menu.addAction(self._actions["clear_display"])
 
         self._pause_action = QAction("暂停/继续(&P)", self)
         self._pause_action.setShortcut(QKeySequence("Ctrl+P"))
         self._pause_action.triggered.connect(self._toggle_pause)
+        self._actions["toggle_pause"] = self._pause_action
         display_menu.addAction(self._pause_action)
 
         display_menu.addSeparator()
 
         self._ts_menu_action = QAction("时间戳(&T)", self)
-        self._ts_menu_action.setShortcut(QKeySequence("Ctrl+T"))
         self._ts_menu_action.setCheckable(True)
         self._ts_menu_action.setChecked(True)
+        self._ts_menu_action.setShortcut(QKeySequence("Ctrl+T"))
         self._ts_menu_action.triggered.connect(self._toggle_timestamp)
+        self._actions["toggle_timestamp"] = self._ts_menu_action
         display_menu.addAction(self._ts_menu_action)
 
-        # 模式切换
+        # 模式切换（带勾选）
         mode_menu = display_menu.addMenu("显示模式(&M)")
+        self._mode_action_group = QActionGroup(self)
+        self._mode_action_group.setExclusive(True)
+        self._current_mode = "ASCII"
         for mode in ["ASCII", "HEX", "HEX+ASCII"]:
             action = QAction(mode, self)
+            action.setCheckable(True)
+            action.setChecked(mode == self._current_mode)
             action.triggered.connect(lambda checked, m=mode: self._set_display_mode(m))
+            self._mode_action_group.addAction(action)
             mode_menu.addAction(action)
 
         # 视图菜单
@@ -232,52 +256,13 @@ class MainWindow(QMainWindow):
 
         # 帮助菜单
         help_menu = menubar.addMenu("帮助(&H)")
-        about_action = QAction("帮助/快捷键", self)
+        about_action = QAction("帮助/快捷键(&A)", self)
         about_action.triggered.connect(self._show_about)
         help_menu.addAction(about_action)
 
     def _setup_toolbar(self):
-        toolbar = QToolBar("主工具栏")
-        toolbar.setMovable(False)
-        toolbar.setIconSize(self._get_toolbar_icon_size())
-        self.addToolBar(toolbar)
-
-        # 连接/断开
-        self._tool_connect_btn = QPushButton("[连接]")
-        self._tool_connect_btn.clicked.connect(self._toggle_connect)
-        toolbar.addWidget(self._tool_connect_btn)
-
-        toolbar.addSeparator()
-
-        # 保存
-        save_btn = QPushButton("💾 保存")
-        save_btn.clicked.connect(self._save_data)
-        toolbar.addWidget(save_btn)
-
-        # 清除
-        clear_btn = QPushButton("🗑 清除")
-        clear_btn.clicked.connect(self._clear_display)
-        toolbar.addWidget(clear_btn)
-
-        # 暂停
-        self._tool_pause_btn = QPushButton("[暂停]")
-        self._tool_pause_btn.setCheckable(True)
-        self._tool_pause_btn.clicked.connect(self._toggle_pause)
-        toolbar.addWidget(self._tool_pause_btn)
-
-        toolbar.addSeparator()
-
-        # 新建窗口
-        new_tab_btn = QPushButton("[+新窗口]")
-        new_tab_btn.clicked.connect(self._new_tab)
-        toolbar.addWidget(new_tab_btn)
-
-        toolbar.addSeparator()
-
-        # 刷新端口
-        refresh_btn = QPushButton("🔄 刷新端口")
-        refresh_btn.clicked.connect(self._refresh_ports)
-        toolbar.addWidget(refresh_btn)
+        # 工具栏全部移除，功能通过菜单和按钮操作
+        pass
 
     def _setup_statusbar(self):
         status = QStatusBar()
@@ -313,10 +298,18 @@ class MainWindow(QMainWindow):
         self._tab_counter += 1
         tab = SerialTabWidget(self._tab_counter)
 
-        # 同步全局暂停状态
-        if hasattr(self, '_tool_pause_btn'):
-            paused = self._tool_pause_btn.isChecked()
-            tab.display_widget.set_paused(paused)
+        # 设置字体大小变化回调，用于保存配置
+        saved_font_size = self._config.get("fontSize", 10)
+        tab.display_widget.set_font_size(saved_font_size)
+        tab.display_widget.set_font_size_callback(
+            lambda size: self._config.set("fontSize", size)
+        )
+
+        # 连接右键菜单信号
+        dw = tab.display_widget
+        dw.sig_toggle_connect.connect(self._toggle_connect)
+        dw.sig_toggle_pause.connect(self._toggle_pause)
+        dw.sig_save_file.connect(self._save_data)
 
         index = self._tab_widget.addTab(tab, tab.tab_title)
         self._tab_widget.setCurrentIndex(index)
@@ -370,12 +363,7 @@ class MainWindow(QMainWindow):
 
     def _update_connect_button(self, connected: bool):
         """更新连接按钮状态"""
-        if connected:
-            self._tool_connect_btn.setText("[断开]")
-            self._tool_connect_btn.setStyleSheet("background-color: #c44545;")
-        else:
-            self._tool_connect_btn.setText("[连接]")
-            self._tool_connect_btn.setStyleSheet("")
+        # 连接状态由顶部串口配置栏的按钮管理
 
     def _update_status_info(self):
         """更新状态栏信息"""
@@ -406,8 +394,6 @@ class MainWindow(QMainWindow):
                 w = self._tab_widget.widget(i)
                 if isinstance(w, SerialTabWidget) and hasattr(w, 'display_widget'):
                     w.display_widget.set_paused(paused)
-            self._tool_pause_btn.setChecked(paused)
-            self._tool_pause_btn.setText("[继续]" if paused else "[暂停]")
             self._pause_action.setText("继续" if paused else "暂停")
 
     def _clear_display(self):
@@ -418,19 +404,25 @@ class MainWindow(QMainWindow):
                 widget.display_widget.clear_display()
 
     def _toggle_timestamp(self):
-        """切换时间戳"""
-        widget = self.current_tab
-        if widget and hasattr(widget, 'display_widget'):
-            visible = self._ts_menu_action.isChecked()
-            widget.display_widget.set_timestamp_visible(visible)
-            if hasattr(widget, '_ts_cb'):
-                widget._ts_cb.setChecked(visible)
+        """切换时间戳（应用到所有 Tab）"""
+        visible = self._ts_menu_action.isChecked()
+        for i in range(self._tab_widget.count()):
+            widget = self._tab_widget.widget(i)
+            if isinstance(widget, SerialTabWidget):
+                widget.display_widget.set_timestamp_visible(visible)
 
     def _set_display_mode(self, mode: str):
-        """设置显示模式"""
-        widget = self.current_tab
-        if widget:
-            widget.display_widget.set_display_mode(mode)
+        """设置显示模式（应用到所有 Tab）"""
+        self._current_mode = mode
+        # 更新菜单勾选
+        for action in self._mode_action_group.actions():
+            if action.text() == mode:
+                action.setChecked(True)
+                break
+        for i in range(self._tab_widget.count()):
+            widget = self._tab_widget.widget(i)
+            if isinstance(widget, SerialTabWidget):
+                widget.display_widget.set_display_mode(mode)
 
     def _set_theme(self, theme: str):
         """切换主题"""
@@ -466,6 +458,43 @@ class MainWindow(QMainWindow):
         """另存为"""
         self._save_data()
 
+    def _toggle_auto_save(self):
+        """切换自动保存"""
+        if self._auto_save_enabled:
+            # 停止自动保存
+            self._auto_save_enabled = False
+            self._auto_save_timer.stop()
+            self._auto_save_file = None
+            self._auto_save_action.setChecked(False)
+            self._status_info.setText("自动保存已停止")
+        else:
+            # 选择保存文件
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "自动保存到...", "serial_auto.log",
+                "Log Files (*.log);;Text Files (*.txt);;All Files (*)"
+            )
+            if not file_path:
+                return
+            self._auto_save_enabled = True
+            self._auto_save_file = file_path
+            self._auto_save_timer.start()
+            self._auto_save_action.setChecked(True)
+            self._status_info.setText(f"自动保存中: {file_path}")
+
+    def _do_auto_save(self):
+        """执行自动保存（由定时器触发）"""
+        if not self._auto_save_enabled or not self._auto_save_file:
+            return
+        try:
+            widget = self.current_tab
+            if widget and hasattr(widget, 'display_widget'):
+                text = widget.display_widget.get_all_text()
+                if text:
+                    with open(self._auto_save_file, "w", encoding="utf-8") as f:
+                        f.write(text)
+        except Exception:
+            pass  # 自动保存静默失败，不弹框打扰用户
+
     def _show_about(self):
         """关于/帮助对话框"""
         QMessageBox.about(
@@ -479,7 +508,7 @@ class MainWindow(QMainWindow):
 <tr><td><b>F1</b></td><td>连接 / 断开串口</td></tr>
 <tr><td><b>Ctrl + C</b></td><td>复制选中数据</td></tr>
 <tr><td><b>Ctrl + S</b></td><td>保存当前窗口数据</td></tr>
-<tr><td><b>Ctrl + Shift + C</b></td><td>清空所有窗口显示</td></tr>
+<tr><td><b>F9</b></td><td>清空所有窗口显示</td></tr>
 <tr><td><b>Ctrl + P</b></td><td>暂停 / 继续所有窗口数据显示</td></tr>
 <tr><td><b>Ctrl + T</b></td><td>切换时间戳显示</td></tr>
 <tr><td><b>Ctrl + N</b></td><td>新建串口窗口</td></tr>
@@ -576,6 +605,7 @@ class MainWindow(QMainWindow):
         if fmt == "HEX":
             success, msg = self._serial_manager.send_hex(data)
         else:
+            # 同时支持字面量 \r\n 和真正的控制字符
             actual_data = data.replace("\\r\\n", "\r\n").replace("\\r", "\r").replace("\\n", "\n")
             success, msg = self._serial_manager.send_data(actual_data.encode("utf-8"))
 
@@ -669,6 +699,8 @@ class MainWindow(QMainWindow):
             self._serial_manager.disconnect()
 
         self._send_widget.stop_timer()
+        if self._auto_save_enabled:
+            self._auto_save_timer.stop()
         for i in range(self._tab_widget.count()):
             widget = self._tab_widget.widget(i)
             if isinstance(widget, SerialTabWidget):

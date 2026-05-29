@@ -24,7 +24,7 @@ DEFAULT_CONFIG_PATH = os.path.join(_get_config_dir(), "config.json")
 DEFAULT_CONFIG = {
     "theme": "dark",
     "language": "zh-CN",
-    "maxDisplayLines": 10000,
+    "fontSize": 10,
     "autoReconnect": False,
     "logDir": "./logs",
     "autoLog": False,

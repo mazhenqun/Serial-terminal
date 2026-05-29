@@ -70,13 +70,18 @@ class LineNumberArea(QWidget):
 class SerialDisplayWidget(QPlainTextEdit):
     """串口数据显示组件"""
 
+    # 右键菜单操作信号
+    sig_toggle_connect = pyqtSignal()
+    sig_toggle_pause = pyqtSignal()
+    sig_save_file = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._display_mode = "ASCII"  # ASCII / HEX / Mixed
         self._show_timestamp = True
         self._timestamp_mode = "absolute"  # absolute / relative / none
         self._paused = False
-        self._max_lines = 10000
+        self._max_lines = 9999999
         self._start_time = datetime.now()
         self._buffer: List[str] = []
         self._buffer_size = 0
@@ -118,7 +123,8 @@ class SerialDisplayWidget(QPlainTextEdit):
 
         # 搜索相关
         self._search_text = ""
-        self._last_search_pos = 0
+        self._search_total = 0
+        self._search_current_index = 0
 
         # 右键菜单
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -128,6 +134,9 @@ class SerialDisplayWidget(QPlainTextEdit):
         self._flush_timer = QTimer(self)
         self._flush_timer.timeout.connect(self._flush_buffer)
         self._flush_timer.start(100)  # 每 100ms 刷新一次
+
+        # 监听滚动条值变化，拖动滚动条时也能正确暂停/恢复自动滚动
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll_changed)
 
         self._update_line_number_area_width()
 
@@ -187,6 +196,21 @@ class SerialDisplayWidget(QPlainTextEdit):
 
             scrollbar = self.verticalScrollBar()
             
+            # 保存当前滚动位置，用于非自动滚动模式下保持视口不动
+            was_at_bottom = (scrollbar.value() >= scrollbar.maximum() - 10)
+            old_scroll_pos = scrollbar.value()
+            
+            # 保存搜索选中位置
+            saved_search_pos = None
+            if self._search_text and self.textCursor().hasSelection():
+                saved_search_pos = self.textCursor().selectionStart()
+            
+            # 临时断开滚动信号，防止 setValue 触发 _on_scroll_changed 覆盖 _auto_scroll
+            try:
+                scrollbar.valueChanged.disconnect(self._on_scroll_changed)
+            except Exception:
+                pass
+            
             # 使用原生的 maximumBlockCount 代替手动 trim，极大提高性能
             text = "\n".join(self._buffer)
             self.moveCursor(QTextCursor.MoveOperation.End)
@@ -194,43 +218,62 @@ class SerialDisplayWidget(QPlainTextEdit):
             self._buffer.clear()
             self._buffer_size = 0
 
-            if self._auto_scroll:
+            if self._auto_scroll or was_at_bottom:
                 scrollbar.setValue(scrollbar.maximum())
+            else:
+                # 不在底部时，强制恢复之前的滚动位置，防止 insertPlainText 自动滚屏
+                scrollbar.setValue(old_scroll_pos)
+            
+            # 恢复搜索选中位置
+            if saved_search_pos is not None:
+                doc = self.document()
+                found = doc.find(self._search_text, saved_search_pos)
+                if found.isNull():
+                    found = doc.find(self._search_text, 0)
+                if not found.isNull():
+                    self.setTextCursor(found)
+                    self.ensureCursorVisible()
         except Exception:
             import traceback
             traceback.print_exc()
+        finally:
+            # 恢复滚动信号连接
+            try:
+                scrollbar.valueChanged.connect(self._on_scroll_changed)
+            except Exception:
+                pass
+
+    def _on_scroll_changed(self, value: int):
+        """滚动条值变化时，判断是否在底部以决定是否自动滚动"""
+        scrollbar = self.verticalScrollBar()
+        self._auto_scroll = (value >= scrollbar.maximum() - 10)
 
     def wheelEvent(self, event):
-        """鼠标滚轮事件：检测用户是否手动滚动"""
+        """鼠标滚轮事件：Ctrl+滚轮调整字体大小"""
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                new_size = self._font.pointSize() + 1
+            else:
+                new_size = max(6, self._font.pointSize() - 1)
+            self.set_font_size(new_size)
+            # 通知主窗口保存字体大小配置
+            if hasattr(self, '_font_size_callback'):
+                self._font_size_callback(new_size)
+            return
         super().wheelEvent(event)
-        # 滚轮操作后检查是否在底部
-        scrollbar = self.verticalScrollBar()
-        self._auto_scroll = (scrollbar.value() >= scrollbar.maximum() - 10)
 
     def mousePressEvent(self, event):
-        """鼠标点击事件：用户选中文本时停止自动滚动"""
+        """鼠标点击事件"""
         super().mousePressEvent(event)
-        # 点击后延迟检查（等选中操作完成）
-        QTimer.singleShot(50, self._check_auto_scroll)
 
     def mouseReleaseEvent(self, event):
         """鼠标释放事件"""
         super().mouseReleaseEvent(event)
-        QTimer.singleShot(50, self._check_auto_scroll)
 
     def keyPressEvent(self, event):
-        """键盘事件：用户可能用键盘选中文本"""
+        """键盘事件"""
         super().keyPressEvent(event)
-        QTimer.singleShot(50, self._check_auto_scroll)
-
-    def _check_auto_scroll(self):
-        """检查是否应该恢复自动滚动"""
-        scrollbar = self.verticalScrollBar()
-        # 如果用户在底部，恢复自动滚动
-        if scrollbar.maximum() == 0:
-            self._auto_scroll = True
-        else:
-            self._auto_scroll = (scrollbar.value() >= scrollbar.maximum() - 10)
 
     def _format_line(self, text: str, is_tx: bool) -> str:
         """格式化单行文本为显示行"""
@@ -295,6 +338,17 @@ class SerialDisplayWidget(QPlainTextEdit):
         """设置最大显示行数"""
         self._max_lines = max_lines
         self.document().setMaximumBlockCount(max_lines)
+
+    def set_font_size(self, size: int):
+        """设置字体大小"""
+        self._font = QFont("Consolas", size)
+        self._font.setStyleHint(QFont.StyleHint.Monospace)
+        self.setFont(self._font)
+        self._update_line_number_area_width()
+
+    def set_font_size_callback(self, callback):
+        """设置字体大小变化回调（用于保存配置）"""
+        self._font_size_callback = callback
 
     def set_filter(self, enabled: bool, pattern: str = "", mode: str = "whitelist",
                    highlight: bool = False, bg_color: str = "#ffff00",
@@ -383,6 +437,9 @@ class SerialDisplayWidget(QPlainTextEdit):
 
     def _show_context_menu(self, pos):
         menu = QMenu(self)
+        toggle_connect_action = menu.addAction("连接/断开  F1")
+        toggle_connect_action.triggered.connect(self.sig_toggle_connect.emit)
+        menu.addSeparator()
         copy_action = menu.addAction("复制 Ctrl+C")
         copy_action.triggered.connect(self._safe_copy)
         select_all_action = menu.addAction("全选 Ctrl+A")
@@ -391,12 +448,26 @@ class SerialDisplayWidget(QPlainTextEdit):
         find_action = menu.addAction("查找 Ctrl+F")
         find_action.triggered.connect(self._show_search_bar)
         menu.addSeparator()
+        resume_action = menu.addAction("恢复滚动")
+        resume_action.triggered.connect(self._resume_scroll)
+        menu.addSeparator()
+        toggle_pause_action = menu.addAction("暂停/继续  Ctrl+P")
+        toggle_pause_action.triggered.connect(self.sig_toggle_pause.emit)
+        save_action = menu.addAction("保存文件  Ctrl+S")
+        save_action.triggered.connect(self.sig_save_file.emit)
+        menu.addSeparator()
         clear_action = menu.addAction("清空")
         clear_action.triggered.connect(self.clear_display)
         try:
             menu.exec(self.mapToGlobal(pos))
         except Exception:
             pass
+
+    def _resume_scroll(self):
+        """恢复自动滚动到底部"""
+        self._auto_scroll = True
+        scrollbar = self.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
 
     def _safe_copy(self):
         """安全复制"""
@@ -501,23 +572,44 @@ class SerialDisplayWidget(QPlainTextEdit):
     def _on_search_text_changed(self, text: str):
         """搜索文本变化"""
         self._search_text = text
-        self._last_search_pos = 0
+        self._search_current_index = 0
         if text:
             self._highlighter.set_search_pattern(text)
+            self._update_search_count(text)
             self._find_next()
         else:
             self._highlighter.set_search_pattern(None)
             self._search_count_label.setText("")
 
+    def _update_search_count(self, text: str):
+        """计算匹配总数"""
+        if not text:
+            self._search_count_label.setText("")
+            return
+        doc = self.document()
+        count = 0
+        cursor = QTextCursor(doc)
+        while True:
+            found = doc.find(text, cursor)
+            if found.isNull():
+                break
+            count += 1
+            cursor.setPosition(found.selectionEnd())
+        self._search_total = count
+        if count == 0:
+            self._search_count_label.setText("无匹配")
+        else:
+            self._search_count_label.setText(f"1/{count}")
+
     def _find_next(self):
         """查找下一个"""
         if not self._search_text:
             return
-        
+
         cursor = self.textCursor()
-        cursor.clearSelection() # 清除之前的选中状态以向后查找
-        found_cursor = self.document().find(self._search_text, cursor.position())
-        
+        pos = cursor.selectionEnd() if cursor.hasSelection() else cursor.position()
+        found_cursor = self.document().find(self._search_text, pos)
+
         if found_cursor.isNull():
             # 回到开头找
             found_cursor = self.document().find(self._search_text, 0)
@@ -527,27 +619,62 @@ class SerialDisplayWidget(QPlainTextEdit):
 
         self.setTextCursor(found_cursor)
         self.ensureCursorVisible()
-        self._search_count_label.setText("匹配")
+        self._update_match_index(found_cursor.selectionStart())
 
     def _find_previous(self):
         """查找上一个"""
         if not self._search_text:
             return
-            
-        cursor = self.textCursor()
-        cursor.clearSelection()
-        found_cursor = self.document().find(self._search_text, cursor.position(), QTextDocument.FindFlag.FindBackward)
-        
-        if found_cursor.isNull():
-            # 从末尾开始找
-            found_cursor = self.document().find(self._search_text, self.document().characterCount() - 1, QTextDocument.FindFlag.FindBackward)
-            if found_cursor.isNull():
-                self._search_count_label.setText("无匹配")
-                return
 
-        self.setTextCursor(found_cursor)
-        self.ensureCursorVisible()
-        self._search_count_label.setText("匹配")
+        # 收集所有匹配位置
+        matches = []
+        doc = self.document()
+        c = QTextCursor(doc)
+        while True:
+            f = doc.find(self._search_text, c)
+            if f.isNull():
+                break
+            matches.append(f.selectionStart())
+            c.setPosition(f.selectionEnd())
+
+        if not matches:
+            self._search_count_label.setText("无匹配")
+            return
+
+        # 找上一个匹配：当前光标位置之前最近的一个
+        cursor = self.textCursor()
+        current_pos = cursor.selectionStart() if cursor.hasSelection() else cursor.position()
+
+        prev_pos = -1
+        for m in reversed(matches):
+            if m < current_pos:
+                prev_pos = m
+                break
+
+        if prev_pos == -1:
+            # 当前已经在第一个，循环到最后一个
+            prev_pos = matches[-1]
+
+        found_cursor = doc.find(self._search_text, prev_pos)
+        if not found_cursor.isNull():
+            self.setTextCursor(found_cursor)
+            self.ensureCursorVisible()
+            self._update_match_index(prev_pos)
+
+    def _update_match_index(self, pos: int):
+        """更新当前匹配序号显示"""
+        if not hasattr(self, '_search_total') or self._search_total <= 0:
+            return
+        count = 1
+        doc = self.document()
+        c = QTextCursor(doc)
+        while True:
+            f = doc.find(self._search_text, c)
+            if f.isNull() or f.selectionStart() >= pos:
+                break
+            count += 1
+            c.setPosition(f.selectionEnd())
+        self._search_count_label.setText(f"{count}/{self._search_total}")
 
     def _select_and_scroll_to(self, pos: int, length: int):
         """选中并滚动到指定位置（已被原生查找替代）"""
